@@ -33,15 +33,15 @@ task.timing.cfg_samp_clk_timing(rate=sample_rate,
 
 # Acquire data
 data = task.read(number_of_samples_per_channel=buffer_size) # get a number of readings from the NI device equal to buffer_size                                                        
-task.stop()  task.stop()                                    # stops the nidaqmx task                                                                                                  
+task.stop()                                                 # stops the nidaqmx task                                                                                                  
 task.close()                                                # clears all modifications made to the nidaqmx task                                                                       
 
 times = np.linspace(0,total_time, buffer_size)              # creates linearly spaced times from 0 to total_time. The third number will be the number of times generated (buffer_size)
 
 data = np.array(data)                                       # creates a numpy array.                                                                                                  
-times = np.array(times)                                     # these arrays work much fatser than regular arrays in python because numpy is partially built with a C/C++ backend
+times = np.array(times)                                     # these arrays work much fatser than regular arrays in python because numpy is partially built with a C/C++ backend       
 
-print(data)
-print(times)
+print(data)                                                 # There is a lot of data, so it may only print some of it                                                                 
+print(times)                                                # there are a lot of times, so it may only print some of it
 
 

@@ -59,17 +59,14 @@ data = np.array(data)                                       # creates a numpy ar
 times = np.array(times)                                     # these arrays work much fatser than regular arrays in python because numpy is partially built with a C/C++ backend
 
 
-df=pd.DataFrame(filtered_data, index=times, columns=['voltage'])                               # The index is the time axis, and the data is the voltage values.                        
-df.to_csv(r'F:\python\ECG Stuff\ECG_data.csv', index=True, header=True)                        # Save the data to a CSV file (the r at the beginning indicates that this is a file path)
-
 # Apply bandpass filter
 filtered_data = apply_bandpass_filter(data, lowcut=0.5, highcut=40.0, fs=sample_rate, order=4)
-df=pd.DataFrame(filtered_data, index=times, columns=['voltage'])        # The index is the time axis, and the data is the voltage values.                        
+df=pd.DataFrame(filtered_data, index=times, columns=['voltage'])        # create a dataframe (like a python spreadsheet). The index is the time axis, and the data is the voltage values.
 df.to_csv(r'F:\python\ECG Stuff\ECG_data.csv', index=True, header=True) # Save the data to a CSV file (the r at the beginning indicates that this is a file path)
 
 # Plot the final graph
 plt.figure(figsize=(10, 5))                                     # create a figure and set the figure size to 10" by 5"                                                                           
-plt.plot(times, data, linewidth=2, label="Filtered ECG Signal") # plot signal data with a label                                                                                                  
+plt.plot(times, filtered_data, linewidth=2, label="Filtered ECG Signal") # plot signal data with a label                                                                                                  
 plt.xlabel('Time (seconds)')                                    # label the x axis                                                                                                               
 plt.ylabel('Voltage (V)')                                       # label the y axis                                                                                                               
 plt.title('ECG Signal')                                         # title the graph                                                                                                                
