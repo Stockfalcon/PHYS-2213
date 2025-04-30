@@ -45,18 +45,22 @@ def apply_bandpass_filter(data, lowcut=0.5, highcut=40.0, fs=1000.0, order=4): #
 # Data acquisition and processing
 task=nidaqmx.Task()
 task.ai_channels.add_ai_voltage_chan(f"{device}/{channel}",
-                                        terminal_config=TerminalConfiguration.RSE)
+                                    terminal_config=TerminalConfiguration.RSE) # adds an analog input assigned to {device} and {channel}
 task.timing.cfg_samp_clk_timing(rate=sample_rate,
                                 sample_mode=AcquisitionType.FINITE,
-                                samps_per_chan=buffer_size)
+                                samps_per_chan=buffer_size) # for configuring when to take samples based on the hardware's internal sample clock
 # Acquire data
-data = task.read(number_of_samples_per_channel=buffer_size)
+data = task.read(number_of_samples_per_channel=buffer_size) # get a number of readings from the NI device equal to buffer_size                                                 
+task.stop()                                                 # stops the nidaqmx task                                                                                           
+task.close()                                                # clears all modifications made to the nidaqmx task                                                                
 
-task.stop()
-task.close()
+times = np.linspace(0,total_time, buffer_size)              # creates a number of evenly spaced times from 0 to total_time equal to buffer_size                                
+data = np.array(data)                                       # creates a numpy array                                                                                            
+times = np.array(times)                                     # these arrays work much fatser than regular arrays in python because numpy is partially built with a C/C++ backend
 
-times = np.linspace(0,total_time, buffer_size)
-data=np.array(data)
+
+df=pd.DataFrame(filtered_data, index=times, columns=['voltage'])                               # The index is the time axis, and the data is the voltage values.                        
+df.to_csv(r'F:\python\ECG Stuff\ECG_data.csv', index=True, header=True)                        # Save the data to a CSV file (the r at the beginning indicates that this is a file path)
 
 # Apply bandpass filter
 filtered_data = apply_bandpass_filter(data, lowcut=0.5, highcut=40.0, fs=sample_rate, order=4)
