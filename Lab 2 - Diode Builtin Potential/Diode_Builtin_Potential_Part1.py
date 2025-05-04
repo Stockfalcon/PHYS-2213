@@ -32,8 +32,8 @@ plot_buffer = np.zeros((2,1000)) # rolling window
 
 take_readings=True
 
-resistor_plot = np.empty((2,0))
-diode_plot = np.empty((2,0))
+resistor_plot = np.zeros((2,1))
+diode_plot = np.zeros((2,1))
   
 resistor_data = np.array([])
 diode_data = np.array([])
@@ -65,21 +65,30 @@ task_ao.timing.cfg_samp_clk_timing(sample_rate, sample_mode=AcquisitionType.FINI
 
 def nidaqmx_task(ao_voltages):
     global data, resistor_data, diode_data
-
-    voltage_index=0
-    analog_out = np.tile(ao_voltages[voltage_index],samples_per_point)
-    task_ao.write(analog_out)
-    task_ao.start()
+    
+    initial_write= np.tile(0,samples_per_point) # write the first voltage to the output channel to avoid a delay in the first reading
+    task_ao.write(initial_write)
     task_ai.start()
-    data = task_ai.read(number_of_samples_per_channel=samples_per_point) # this will read data from both ai tasks
-    voltage_index += 1
-    task_ao.stop()
-    task_ai.stop()
+    task_ao.start()
+    voltage_index=0
+    while voltage_index <= len(ao_voltages):
+        analog_out = np.tile(ao_voltages[voltage_index],samples_per_point)
+        task_ao.write(analog_out)
+        data = task_ai.read(number_of_samples_per_channel=samples_per_point) # this will read data from both ai tasks
+        task_ao.wait_until_done()
+        task_ai.wait_until_done()
 
+
+        with threading.Lock():
+            np.append(resistor_data, data[0])
+            np.append(diode_data, data[1])
         
-    np.hstack([resistor_data, data[0]])
-    np.hstack([diode_data, data[1]])
-        
+        voltage_index += 1
+    task_ai.stop()
+    task_ao.stop()
+    task_ai.close()
+    task_ao.close()
+            
         
 
         
@@ -93,24 +102,30 @@ lines = [ax.plot(plot_buffer[i])[0] for i in range(2)]
 ax.set_ylim(-0.01,0.1)
 
 def averager():
-    global averager_index, resistor_data, diode_data
-    resistor_avg = np.mean(resistor_data[averager_index : averager_index+samples_per_point])
-    diode_avg = np.mean(diode_data[averager_index : averager_index+samples_per_point])
-    averager_index += samples_per_point
-    return resistor_avg, diode_avg, averager_index
+    global averager_index
+
+    if averager_index + samples_per_point >= len(resistor_data):
+        print("not enough samples yet")
+        return 0, 0, averager_index
+
+    else:
+        resistor_avg = np.mean(resistor_data[averager_index : averager_index+samples_per_point])
+        diode_avg = np.mean(diode_data[averager_index : averager_index+samples_per_point])
+        averager_index += samples_per_point
+        return resistor_avg, diode_avg, averager_index
 
 def update(frame, plot_buffer):
     global all_data, resistor_plot, diode_plot
 
     resistor_avg, diode_avg, averager_index = averager()
 
-    ao_voltages_index = (averager_index/samples_per_point)
+    ao_voltages_index = int((averager_index/samples_per_point))
 
-    np.hstack([resistor_plot,[[ao_voltages[0]],[resistor_avg]]])
-    np.hstack([diode_plot,[[ao_voltages[0]],[diode_avg]]])
+    np.append(resistor_plot,[[ao_voltages[ao_voltages_index]],[resistor_avg]])
+    np.append(diode_plot,[[ao_voltages[ao_voltages_index]],[diode_avg]])
 
-    lines[0].set_data(resistor_plot[0], resistor_plot[1])
-    lines[1].set_data(diode_plot[0], diode_plot[1])
+    lines[0].set_data(resistor_plot[0].flatten(), resistor_plot[1].flatten())
+    lines[1].set_data(diode_plot[0].flatten(), diode_plot[1].flatten())
 
     return lines
 
@@ -118,7 +133,7 @@ def update(frame, plot_buffer):
 
 
     
-t = threading.Thread(target=nidaqmx_task,args=(list(ao_voltages)))
+t = threading.Thread(target=nidaqmx_task,args=([ao_voltages]))
 t.start()
 
 ani = animation.FuncAnimation(fig, update, fargs=[plot_buffer], interval=(samples_per_point/sample_rate)*1000, blit=True)
