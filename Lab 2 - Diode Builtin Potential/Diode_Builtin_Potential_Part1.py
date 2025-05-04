@@ -7,6 +7,133 @@ import threading
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import animation
+import time
+
+
+
+device = 'Dev2'
+resistor_channel = 'ai0'
+diode_channel = 'ai1'
+voltage_channel ='ao0'
+
+SampleClock = "Dev2/ao/SampleClock"
+trigger_line = "Dev2/ao/StartTrigger"
+
+
+sample_rate = 100
+total_data_points = 1000
+samples_per_point = 500 # we will be taking the average of this many samples for each point plotted to get rid of noise
+total_time = (samples_per_point * total_data_points) / sample_rate # total time in seconds
+ao_voltages = np.linspace(-10,10,total_data_points)
+
+all_data = np.empty((3,0))
+data = np.zeros((2,samples_per_point))
+plot_buffer = np.zeros((2,1000)) # rolling window
+
+take_readings=True
+
+resistor_plot = np.empty((2,0))
+diode_plot = np.empty((2,0))
+  
+resistor_data = np.array([])
+diode_data = np.array([])
+
+voltage_index = 0
+
+
+averager_index = 0
+
+#NOTE TO SELF: WHEN READINGS ARE TAKEN, THEY WILL TAKE A NUMBER OF SAMPLES DEFINED BY samples_per_point  
+
+task_ai, task_ao = nidaqmx.Task(), nidaqmx.Task()
+# set up all resistor analog input.
+task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{resistor_channel}',
+                                                terminal_config=TerminalConfiguration.DIFF) # add an ai channel and set the measurement type to an differential measurement system.
+#                                                                                           This ensures that the input measured is NOT referenced to ground, but to the negative ai0 terminal.  
+#                                                                                           https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
+# setup diode analog input. 
+task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{diode_channel}',terminal_config=TerminalConfiguration.DIFF) 
+task_ai.timing.cfg_samp_clk_timing(sample_rate, sample_mode=AcquisitionType.FINITE, samps_per_chan=samples_per_point) # set the sample rate and clock source for the input channel
+
+# setup analog output. 
+task_ao.ao_channels.add_ao_voltage_chan(f'{device}/{voltage_channel}',
+                                                min_val=-10.0, max_val=10.0)
+
+task_ao.timing.cfg_samp_clk_timing(sample_rate, sample_mode=AcquisitionType.FINITE, samps_per_chan=total_data_points) # set the sample rate and clock source for the output channel
+
+
+
+def nidaqmx_task(ao_voltages):
+    global data, resistor_data, diode_data
+
+    voltage_index=0
+    analog_out = np.tile(ao_voltages[voltage_index],samples_per_point)
+    task_ao.write(analog_out)
+    task_ao.start()
+    task_ai.start()
+    data = task_ai.read(number_of_samples_per_channel=samples_per_point) # this will read data from both ai tasks
+    voltage_index += 1
+    task_ao.stop()
+    task_ai.stop()
+
+        
+    np.hstack([resistor_data, data[0]])
+    np.hstack([diode_data, data[1]])
+        
+        
+
+        
+    
+
+
+print(plot_buffer)
+fig, ax = plt.subplots()
+lines=[]
+lines = [ax.plot(plot_buffer[i])[0] for i in range(2)]
+ax.set_ylim(-0.01,0.1)
+
+def averager():
+    global averager_index, resistor_data, diode_data
+    resistor_avg = np.mean(resistor_data[averager_index : averager_index+samples_per_point])
+    diode_avg = np.mean(diode_data[averager_index : averager_index+samples_per_point])
+    averager_index += samples_per_point
+    return resistor_avg, diode_avg, averager_index
+
+def update(frame, plot_buffer):
+    global all_data, resistor_plot, diode_plot
+
+    resistor_avg, diode_avg, averager_index = averager()
+
+    ao_voltages_index = (averager_index/samples_per_point)
+
+    np.hstack([resistor_plot,[[ao_voltages[0]],[resistor_avg]]])
+    np.hstack([diode_plot,[[ao_voltages[0]],[diode_avg]]])
+
+    lines[0].set_data(resistor_plot[0], resistor_plot[1])
+    lines[1].set_data(diode_plot[0], diode_plot[1])
+
+    return lines
+
+
+
+
+    
+t = threading.Thread(target=nidaqmx_task,args=(list(ao_voltages)))
+t.start()
+
+ani = animation.FuncAnimation(fig, update, fargs=[plot_buffer], interval=(samples_per_point/sample_rate)*1000, blit=True)
+
+
+plt.show()
+# time.sleep(5)
+t.join()
+
+
+# print(all_data)
+# all_data = np.transpose(all_data)
+# df=pd.DataFrame(all_data)
+# print(df)
+# df.to_csv(r"C:\Users\lenovo\Downloads\data.csv")
 
 # ----- MISTAKES(?) IN LAST WEEK'S LAB -----
 
@@ -19,124 +146,4 @@ from matplotlib import animation
 # Some one with more competency than me should look here to verify if I'm correct
 # https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
 
-
-device = 'Dev2'
-resistor_channel = 'ai0'
-diode_channel = 'ai1'
-voltage_channel ='ao0'
-
-SampleClock = "Dev2/ao/SampleClock"
-trigger_line = "Dev2/ao/StartTrigger"
-
-
-sample_rate = 1000
-total_data_points = 1000
-samples_per_point = 50 # we will be taking the average of this many samples for each point plotted to get rid of noise
-total_time = (samples_per_point * total_data_points) / sample_rate # total time in seconds
-ao_voltages = np.linspace(-10,10,total_data_points)
-
-all_data = [[]] # an empy 2D array
-data = np.zeros((2,samples_per_point))
-plot_buffer = np.zeros((2,1000)) # rolling window
-
-take_readings=True
-
-#NOTE TO SELF: WHEN READINGS ARE TAKEN, THEY WILL TAKE A NUMBER OF SAMPLES DEFINED BY samples_per_point  
-
-def nidaqmx_task():
-    global data
-
-    with nidaqmx.Task() as task_ai,  nidaqmx.Task() as task_ao:
-        # set up all resistor analog input. This will be a follower which listens for a trigger, and timing signals to take readings 
-        task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{resistor_channel}',
-                                                        terminal_config=TerminalConfiguration.DIFF) # add an ai channel and set the measurement type to an differential measurement system.
-        #                                                                                           This ensures that the input measured is NOT referenced to ground, but to the negative ai0 terminal.  
-        #                                                                                           https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
-        '''
-        task_resistor_ai.timing.cfg_samp_clk_timing(sample_rate, 
-                                                    source=SampleClock,
-                                                    sample_mode=AcquisitionType.FINITE,
-                                                    samps_per_chan=samples_per_point)
-        '''
-        
-        # setup diode analog input. This will be a follower which listens for a trigger, and timing signals to take readings 
-        task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{diode_channel}',terminal_config=TerminalConfiguration.DIFF) 
-        '''
-        task_diode_ai.timing.cfg_samp_clk_timing(sample_rate, 
-                                                    source=SampleClock,
-                                                    sample_mode=AcquisitionType.FINITE,
-                                                    samps_per_chan=samples_per_point) 
-        
-        task_ai.triggers.start_trigger.cfg_dig_edge_start_trig(trigger_source=trigger_line,
-                                                                trigger_edge=Edge.RISING)         
-        '''
-        # setup analog outpu. This will be the Leader for sending triggers and telling the Followers when to take readings
-        task_ao.ao_channels.add_ao_voltage_chan(f"{device}/{voltage_channel}",min_val=-10, max_val=10)
-        '''
-        task_ao.timing.cfg_samp_clk_timing(sample_rate, 
-                                            source=SampleClock,
-                                            sample_mode=AcquisitionType.FINITE,
-                                            samps_per_chan=samples_per_point)
-        
-        task_ao.triggers.start_trigger.disable_start_trig() # this is to tell the Leader that it's job is to make a start signal and not to wait until it receives one
-        '''
-        reader = AnalogMultiChannelReader(task_ai.in_stream)
-        writer = AnalogSingleChannelWriter(task_ao.in_stream)
-
-        task_ai.start()
-        task_ao.start()
-        writer.write_many_sample(ao_voltages)
-
-        while take_readings:
-            reader.read_many_sample(data, samples_per_point,timeout=10.0)
-             # Shift old data and add new samples for plotting (NOT THREAD SAFE!)
-            plot_buffer[:, :-samples_per_point] = plot_buffer[:, samples_per_point:]
-            plot_buffer[:, -samples_per_point:] = data
-
-
-t=threading.Thread(target=nidaqmx_task)
-
-t.start()
-
-fig, ax = plt.subplots()
-lines = [ax.plot(plot_buffer[i])[0] for i in range(2)]
-ax.set_ylim(-0.01),0.1
-
-def update(frame):
-    for i, line in enumerate(lines):
-        line.set_ydata(plot_buffer[i])
-    return lines
-
-
-ani = animation.FuncAnimation(fig, update, interval=50, blit=True)
-
-
-plt.show()
-take_readings = False
-t.join() # wait for all threads to finnish
-print(data)
-
-
-            
-
-
-
-    # for i in range(len(ao_voltages)):# this is currently software controlled data aquisition, later we will make this hardware controlled (faster and therefore better)
-    #     task_ao.write(voltage_channel[i], auto_start=False)
-
-    #     task_ao.start()
-    #     task_resistor_ai.start()
-    #     task_diode_ai.start()
-
-    #     resistor_data = task_resistor_ai.read()
-    #     diode_data = task_diode_ai.read()
-
-    #     task_ao.stop()
-    #     task_resistor_ai.stop()
-    #     task_diode_ai.stop()
-
-
-    # task_resistor_ai.stop()
-    # task_diode_ai.stop()
-    # task_resistor_ai.close()
-    # task_diode_ai.close()
+# Hi! i'm writing some code to plot the builtin potential of a diode using nidaqmx in python, but i don't know how to assign  get the voltage values out (x axis) 
