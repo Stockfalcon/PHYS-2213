@@ -35,8 +35,8 @@ take_readings=True
 resistor_plot = np.zeros((2,1))
 diode_plot = np.zeros((2,1))
   
-resistor_data = np.array([])
-diode_data = np.array([])
+resistor_data = []
+diode_data = []
 
 voltage_index = 0
 
@@ -53,41 +53,37 @@ task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{resistor_channel}',
 #                                                                                           https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
 # setup diode analog input. 
 task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{diode_channel}',terminal_config=TerminalConfiguration.DIFF) 
-task_ai.timing.cfg_samp_clk_timing(sample_rate, sample_mode=AcquisitionType.FINITE, samps_per_chan=samples_per_point) # set the sample rate and clock source for the input channel
 
 # setup analog output. 
 task_ao.ao_channels.add_ao_voltage_chan(f'{device}/{voltage_channel}',
                                                 min_val=-10.0, max_val=10.0)
 
-task_ao.timing.cfg_samp_clk_timing(sample_rate, sample_mode=AcquisitionType.FINITE, samps_per_chan=total_data_points) # set the sample rate and clock source for the output channel
 
 
 
 def nidaqmx_task(ao_voltages):
-    global data, resistor_data, diode_data
-    
-    initial_write= np.tile(0,samples_per_point) # write the first voltage to the output channel to avoid a delay in the first reading
-    task_ao.write(initial_write)
-    task_ai.start()
+    global voltage_index, resistor_data, diode_data
+# use simple timing using time.sleep() to control daq
+# use while loop with global voltage_index
+# append data to resistor and diode data arrays (use threading lock)    
+    initial_write= np.tile(0,samples_per_point) 
     task_ao.start()
-    voltage_index=0
+    task_ai.start()
+    task_ao.write(initial_write)
+    
+    
     while voltage_index <= len(ao_voltages):
-        analog_out = np.tile(ao_voltages[voltage_index],samples_per_point)
-        task_ao.write(analog_out)
+        # analog_out = np.tile(ao_voltages[voltage_index],samples_per_point)
+        task_ao.write(ao_voltages[voltage_index])
         data = task_ai.read(number_of_samples_per_channel=samples_per_point) # this will read data from both ai tasks
-        task_ao.wait_until_done()
-        task_ai.wait_until_done()
-
-
-        with threading.Lock():
-            np.append(resistor_data, data[0])
-            np.append(diode_data, data[1])
-        
         voltage_index += 1
-    task_ai.stop()
-    task_ao.stop()
-    task_ai.close()
-    task_ao.close()
+        print(f"Data shape: {np.array(data).shape}")
+        with threading.Lock():
+            resistor_data.extend(data[0])
+            diode_data.extend(data[1])
+
+
+
             
         
 
@@ -109,9 +105,11 @@ def averager():
         return 0, 0, averager_index
 
     else:
+        print('enough samples!')
         resistor_avg = np.mean(resistor_data[averager_index : averager_index+samples_per_point])
         diode_avg = np.mean(diode_data[averager_index : averager_index+samples_per_point])
         averager_index += samples_per_point
+        print(averager_index)
         return resistor_avg, diode_avg, averager_index
 
 def update(frame, plot_buffer):
@@ -120,9 +118,10 @@ def update(frame, plot_buffer):
     resistor_avg, diode_avg, averager_index = averager()
 
     ao_voltages_index = int((averager_index/samples_per_point))
+    print(ao_voltages[ao_voltages_index])
 
-    np.append(resistor_plot,[[ao_voltages[ao_voltages_index]],[resistor_avg]])
-    np.append(diode_plot,[[ao_voltages[ao_voltages_index]],[diode_avg]])
+    resistor_plot = np.hstack((resistor_plot,[[ao_voltages[ao_voltages_index]],[resistor_avg]]))
+    diode_plot = np.hstack((diode_plot,[[ao_voltages[ao_voltages_index]],[diode_avg]]))
 
     lines[0].set_data(resistor_plot[0].flatten(), resistor_plot[1].flatten())
     lines[1].set_data(diode_plot[0].flatten(), diode_plot[1].flatten())
@@ -135,7 +134,8 @@ def update(frame, plot_buffer):
     
 t = threading.Thread(target=nidaqmx_task,args=([ao_voltages]))
 t.start()
-
+ax.set_xlim(-10,10)
+ax.set_ylim(-0.01,0.1)
 ani = animation.FuncAnimation(fig, update, fargs=[plot_buffer], interval=(samples_per_point/sample_rate)*1000, blit=True)
 
 
