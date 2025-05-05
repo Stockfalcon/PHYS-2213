@@ -1,7 +1,27 @@
+# Coded by Thomas Murimboh with help from ChatGTP and Copilot 
+# May 05, 2025
+
+
+# ----- MISTAKES(?) IN LAST WEEK'S LAB -----
+
+# apparently, it is better to use    with nidaqmx.Task() as task:   instead of    task = nidaqmx.Task()
+# because if the program stops unexpectedly, it won't give you a warning about resources being reserved or something like that
+# I could have changed it in the last lab after I learned this but I didn't want to :)
+# You'll also notice I didn't make the change for this lab. This was because I couldn't figure out a way to make it work efficiently with the threading library
+
+# Also in the last lab, the TerminalConfiguration argument in the nidaqmx task setup was set to .RSE
+# I think this referenced the analog input to ground and should have been set to .DIFF (differential)
+# Some one with more competency than me should look here to verify if I'm correct
+# https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
+
+# ----- SETTING THE STAGE -----
+
+
+# ----- LINKS TO DOCUMENTATION -----
+
+
 import nidaqmx
-from nidaqmx.constants import TerminalConfiguration, AcquisitionType, Edge
-from nidaqmx.stream_readers import AnalogMultiChannelReader
-from nidaqmx.stream_writers import AnalogSingleChannelWriter
+from nidaqmx.constants import TerminalConfiguration
 import numpy as np
 import threading 
 import pandas as pd
@@ -10,29 +30,26 @@ from matplotlib import animation
 from queue import Queue
 
 
-
 device = 'Dev2'
 resistor_channel = 'ai0'
 diode_channel = 'ai1'
 voltage_channel ='ao0'
 
+max_voltage = 2
+min_voltage = -2
+
 sample_rate = 1000
-total_data_points = 1000
+total_data_points = 100
 samples_per_point = 50 # we will be taking the average of this many samples for each point plotted to get rid of noise
 total_time = (samples_per_point * total_data_points) / sample_rate # total time in seconds
-ao_voltages = np.linspace(-10,10,total_data_points)
+ao_voltages = np.linspace(min_voltage, max_voltage, total_data_points)
+resistance = 110 # resistance of the resistor in ohms
 
-data = np.zeros((2,samples_per_point))
-plot_buffer = np.zeros((2,1000)) # rolling window
-
-resistor_plot = np.array([[-10],[0]])
-diode_plot = np.array([[-10],[0]])
+diode_plot = np.array([[min_voltage],[0]])
   
 data_queue = Queue()
-voltage_index = 0
+voltage_index = 0 # used for looping through ao_voltages
 
-
-averager_index = 0
 
 #NOTE TO SELF: WHEN READINGS ARE TAKEN, THEY WILL TAKE A NUMBER OF SAMPLES DEFINED BY samples_per_point  
 
@@ -64,50 +81,43 @@ def nidaqmx_task(ao_voltages):
 
         resistor_avg = np.mean(data[0])
         diode_avg = np.mean(data[1])
-        voltage_val = ao_voltages[voltage_index]
 
-        data_queue.put((voltage_val, resistor_avg, diode_avg))
+        current = resistor_avg/resistance
+
+
+        # print(f"current: {current}, diode_avg: {diode_avg}\n")
+
+        data_queue.put((diode_avg, current))
+
+        # print(f"{data_queue.qsize()}")
 
         voltage_index += 1
 
 
 
-
-            
-        
-
-        
-    
-
-
-
 fig, ax = plt.subplots()
-resistor_line, = ax.plot([],[], label='resistor') # The ax.plot() function returns a list of lines and we only wan't one line
 diode_line, = ax.plot([],[], label='diode')
-ax.set_xlim(-10,10)
-ax.set_ylim(-0.01,0.1)
+ax.set_xlim(-0.01,0.01)
+ax.set_ylim(-10,1)
 
 def update(frame):
-    global resistor_plot, diode_plot
+    global diode_plot
 
     try:
-        voltage_val, resistor_avg, diode_avg = data_queue.get_nowait()
+        (diode_avg, current) = data_queue.get_nowait()
     except:
-        print("nothing to plot yet")
-        return [resistor_line, diode_line]
+        print(f"nothing to plot yet")
+        return [diode_line]
+
 
     # Add new points
-    resistor_plot = np.hstack((resistor_plot, [[voltage_val], [resistor_avg]]))
-    diode_plot = np.hstack((diode_plot, [[voltage_val], [diode_avg]]))
+    diode_plot = np.hstack((diode_plot, [[diode_avg], [current]]))
 
-    print(f"voltage: {voltage_val}, resistor: {resistor_avg}, diode: {diode_avg}")
 
     # Update plot lines
-    resistor_line.set_data(resistor_plot[0].flatten(), resistor_plot[1].flatten())
-    diode_line.set_data(diode_plot[0].flatten(), diode_plot[1].flatten())
+    diode_line.set_data(diode_plot[0], diode_plot[1])
 
-
-    return [resistor_line, diode_line]
+    return [diode_line]
 
 
 
@@ -121,29 +131,18 @@ t.start()
 
 ax.set_xlim(-10,10)
 ax.set_ylim(-0.01,0.1)
-ani = animation.FuncAnimation(fig, update, interval=50, blit=True)
+ani = animation.FuncAnimation(fig, update, interval=100, blit=True)
 
 
 plt.show()
-# time.sleep(5)
+
 t.join()
 
 
-# print(all_data)
-# all_data = np.transpose(all_data)
-# df=pd.DataFrame(all_data)
-# print(df)
-# df.to_csv(r"C:\Users\lenovo\Downloads\data.csv")
+transposed_data = np.transpose(diode_plot)
+df=pd.DataFrame(transposed_data)
+print(df)
+df.to_csv(r"C:\Users\lenovo\Downloads\data.csv")
 
-# ----- MISTAKES(?) IN LAST WEEK'S LAB -----
 
-# apparently, it is better to use    with nidaqmx.Task() as task:   instead of    task = nidaqmx.Task()
-# because if the program stops unexpectedly, it won't give you a warning about resources being reserved or something like that
-# I could have changed it in the last lab after I learned this but I didn't want to :)
 
-# Also in the last lab, the TerminalConfiguration argument in the nidaqmx task setup was set to .RSE
-# I think this referenced the analog input to ground and should have been set to .DIFF (differential)
-# Some one with more competency than me should look here to verify if I'm correct
-# https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
-
-# Hi! i'm writing some code to plot the builtin potential of a diode using nidaqmx in python, but i don't know how to assign  get the voltage values out (x axis) 
