@@ -1,7 +1,9 @@
-# Coded by Thomas Murimboh with help from ChatGTP and Copilot, comments by Thomas Murimboh
+# Coded by Thomas Murimboh with help from ChatGTP and Copilot 
 # May 05, 2025
 
+
 # ----- MISTAKES(?) IN LAST WEEK'S LAB -----
+
 # apparently, it is better to use    with nidaqmx.Task() as task:   instead of    task = nidaqmx.Task()
 # because if the program stops unexpectedly, it won't give you a warning about resources being reserved or something like that
 # I could have changed it in the last lab after I learned this but I didn't want to :)
@@ -13,9 +15,10 @@
 # https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
 
 # ----- SETTING THE STAGE -----
-# In this part we will be taking voltage readings from both the diode and the resistor and plotting them using matplotlib. Because the signals we get back from 
-# the resistor and diode are digital signals, using a filter like the last lab won't work, so we will take a whole bunch of readings for each voltage we output
-# and then take the average of al of those readings to filter out the noise.
+
+
+# ----- LINKS TO DOCUMENTATION -----
+
 
 
 # ----- LINKS TO DOCUMENTATION -----
@@ -29,6 +32,8 @@ from nidaqmx.constants import TerminalConfiguration # an enum (variable with ver
 import numpy as np                                  # for doing calulations and modifying arrays                                                                             
 import matplotlib.pyplot as plt                     # used to help plot our data                                                                                             
 import pandas as pd                                 # for easily sorting our data as a .CSV                                                                                  
+from queue import Queue                             # we will be using this to control how data is accessed between data aquisition and ploting.
+#                                                     It's knind of like a fancy python list and will be especially important in part 3 when we to use the threading library to speed up our program
 
 
 # Device Parameters
@@ -48,31 +53,33 @@ resistance = 110                                                       # resista
 
 # Other Various parameters
 diode_plot = np.array([[min_voltage],[0]]) # this will be a 2D into which we will store our data points (the legth of the final array will be equal to total_data_points)
-voltage_index = 0 # used for looping through ao_voltages
+voltage_index = 0                          # used for looping through ao_voltages
 
 
 # Task Setup
-task_ai, task_ao = nidaqmx.Task(), nidaqmx.Task()                                                               # inititlize two Task classes 
+task_ai, task_ao = nidaqmx.Task(), nidaqmx.Task()                                                               # inititlize two Task classes                                                          
 
-# set up resistor analog input.
-task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{resistor_channel}',
-                                        terminal_config=TerminalConfiguration.DIFF)                            # add an ai channel and set the measurement type to a differential measurement system. 
-#                                                                                                                This ensures that the input measured is NOT referenced to ground, but to the negative ai0 terminal.           
-#                                                                                                                https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
-#setup diode analog input.                                                                                                                                                                               
+# Setup Resistor Analog Input
+task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{resistor_channel}',                                        
+                                        terminal_config=TerminalConfiguration.DIFF)                             # add an ai channel and set the measurement type to a differential measurement system. 
+#                                                                                                               This ensures that the input measured is NOT referenced to ground, but to the negative ai0 terminal.
+#                                                                                                               https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
+#                                                                                                               setup diode analog input.
+
+# Setup Diode Analog Input
 task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{diode_channel}',terminal_config=TerminalConfiguration.DIFF) # add an ai channel and set the measurement type to a differential measurement system. 
-#                                                                                                                We can use task_ai for both the diode and resistor because one task can control multiple
-#                                                                                                                channels as long as they can be configured in the same way (eg. timing, start trigger). 
+#                                                                                                               We can use task_ai for both the diode and resistor because one task can control multiple           
+#                                                                                                               channels as long as they can be configured in the same way (eg. timing, start trigger).            
 
-# setup analog output.
-task_ao.ao_channels.add_ao_voltage_chan(f'{device}/{voltage_channel}',                                           # add an ao channel and set the max and min output values (varies depending on device).
-                                        min_val=-10.0, max_val=10.0)
+# Setup Analog Output
+task_ao.ao_channels.add_ao_voltage_chan(f'{device}/{voltage_channel}',                                                                                                           
+                                        min_val=-10.0, max_val=10.0)                                            # add an ao channel and set the max and min output values (varies depending on device).
 
 
-def nidaqmx_task(ao_voltages):       # create a function with a space to put our voltagesto output
-    global voltage_index, diode_plot # ensure we can modify these variables inside our function   
-    task_ao.start()                  # start our analog out task                                  
-    task_ai.start()                  # start our analog in task
+def nidaqmx_task(ao_voltages):                                               # create a function with a space to put our voltagesto output                                                                                       
+    global voltage_index, diode_plot                                         # ensure we can modify these variables inside our function                                                                                          
+    task_ao.start()                                                          # start our analog out task                                                                                                                         
+    task_ai.start()                                                          # start our analog in task                                                                                                                          
 
     while voltage_index < len(ao_voltages):                                  # keep running this code until we have outputted and read data from all the voltages                                                                
         task_ao.write(ao_voltages[voltage_index])                            # output the voltage in the list ao_voltages indexed by the value voltage index (we would have to ouput more data if we were usinng hardawre timing)
@@ -93,7 +100,7 @@ def nidaqmx_task(ao_voltages):       # create a function with a space to put our
 
 
 
-nidaqmx_task(ao_voltages)                           #run the function defined above and give it the ao_voltages data                              
+nidaqmx_task(ao_voltages)                           # run the function defined above and give it the ao_voltages data                              
 
 # Create The Figure
 fig, ax = plt.subplots()                            # create ture and initialize a subplot with the name ax                                        
@@ -103,6 +110,6 @@ ax.set_ylim(-0.01,0.1 )                             # set the y axis limit in am
 plt.show()                                          # show our graph!                                                                              
                                                     # Next try to write some code to save the graph!                                               
 
-transposed_data = np.transpose(diode_plot)          # make our columns rows and vice versa                                                         
+transposed_data = np.transpose(diode_plot)          # make our columns rows and vice versa
 df=pd.DataFrame(transposed_data)                    # create a data frame (like a python spreadsheet)                                              
-df.to_csv(r"C:\Users\lenovo\Downloads\data.csv")    # save the data to a place on our computer (the r indicates that the string is a file path)
+df.to_csv(r"C:\Users\lenovo\Downloads\data.csv")    # save the data to a place on our computer (the r indicahe figtes the string is a file path)

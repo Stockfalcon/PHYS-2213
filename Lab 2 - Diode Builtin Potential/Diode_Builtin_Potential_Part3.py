@@ -1,7 +1,9 @@
-# Coded by Thomas Murimboh with help from ChatGTP and Copilot, comments by Thomas Murimboh
+# Coded by Thomas Murimboh with help from ChatGTP and Copilot 
 # May 05, 2025
 
+
 # ----- MISTAKES(?) IN LAST WEEK'S LAB -----
+
 # apparently, it is better to use    with nidaqmx.Task() as task:   instead of    task = nidaqmx.Task()
 # because if the program stops unexpectedly, it won't give you a warning about resources being reserved or something like that
 # I could have changed it in the last lab after I learned this but I didn't want to :)
@@ -13,22 +15,21 @@
 # https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
 
 # ----- SETTING THE STAGE -----
-# In this part we will be taking voltage readings from both the diode and the resistor and plotting them using matplotlib. Because the signals we get back from 
-# the resistor and diode are digital signals, using a filter like the last lab won't work, so we will take a whole bunch of readings for each voltage we output
-# and then take the average of al of those readings to filter out the noise.
 
 
 # ----- LINKS TO DOCUMENTATION -----
-
-# ----- NOTE -----
-# Apparently hardware timing is not supported on the NI USB-6002 which is the device I was using.
-# So, this program is built around software timing instead wich is less precice and slower, but it gets the job done.
-
 import nidaqmx                                      # use to communicate with our DAQ card                                                                                   
 from nidaqmx.constants import TerminalConfiguration # an enum (variable with very specific values) that indicate to the nidaqmx.Task() function how to configure each channel
 import numpy as np                                  # for doing calulations and modifying arrays                                                                             
-import matplotlib.pyplot as plt                     # used to help plot our data                                                                                             
+import matplotlib.pyplot as plt                     # used to help plot our data    
+from matplotlib import animation                    # used to help animate our plot                                                                                         
 import pandas as pd                                 # for easily sorting our data as a .CSV                                                                                  
+from queue import Queue                             # we will be using this to control how data is accessed between data aquisition and ploting.
+#                                                     It's knind of like a fancy python list and is especially important when we to use the threading library to speed up our program
+import threading # this library can make our code run faster. A regular python program will wait for each function to finnish. If a function takes a really long time to complete
+#                 (like reading thousands of data points), it will make the whole program take a really long time, even if your program is not actively using CPU power and just waiting for data from a DAQ  
+#                  device. The threading library forces your CPU to keep working on a different function (defined in a different thread) while it's waiting so that things happen more efficiently. It's also worth
+#                 noting that it doesn't make your CPU do two things at once (like multiprocessing does), it just makes your CPU do work instead of waiting when your DAQ card is reading data.               
 
 
 # Device Parameters
@@ -48,8 +49,10 @@ resistance = 110                                                       # resista
 
 # Other Various parameters
 diode_plot = np.array([[min_voltage],[0]]) # this will be a 2D into which we will store our data points (the legth of the final array will be equal to total_data_points)
-voltage_index = 0 # used for looping through ao_voltages
+data_queue = Queue()                       # We will use this to shuttle data from our aquisition function (nidaqmx_task) to our animation function (update)             
+voltage_index = 0                          # used for looping through ao_voltages
 
+#NOTE TO SELF: WHEN READINGS ARE TAKEN, THEY WILL TAKE A NUMBER OF SAMPLES DEFINED BY samples_per_point  
 
 # Task Setup
 task_ai, task_ao = nidaqmx.Task(), nidaqmx.Task()                                                               # inititlize two Task classes 
@@ -59,6 +62,7 @@ task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{resistor_channel}',
                                         terminal_config=TerminalConfiguration.DIFF)                            # add an ai channel and set the measurement type to a differential measurement system. 
 #                                                                                                                This ensures that the input measured is NOT referenced to ground, but to the negative ai0 terminal.           
 #                                                                                                                https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
+
 #setup diode analog input.                                                                                                                                                                               
 task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{diode_channel}',terminal_config=TerminalConfiguration.DIFF) # add an ai channel and set the measurement type to a differential measurement system. 
 #                                                                                                                We can use task_ai for both the diode and resistor because one task can control multiple
@@ -67,6 +71,7 @@ task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{diode_channel}',terminal_con
 # setup analog output.
 task_ao.ao_channels.add_ao_voltage_chan(f'{device}/{voltage_channel}',                                           # add an ao channel and set the max and min output values (varies depending on device).
                                         min_val=-10.0, max_val=10.0)
+
 
 
 def nidaqmx_task(ao_voltages):       # create a function with a space to put our voltagesto output
@@ -84,25 +89,62 @@ def nidaqmx_task(ao_voltages):       # create a function with a space to put our
 
         current = resistor_avg/resistance                                    # calculate the currrent through the diode & resistor                                                                                               
 
-        diode_plot = np.hstack((diode_plot, [[diode_avg], [current]]))       # add this to the data we will be plotting                                                                                                          
+        data_queue.put((diode_avg, current))                                 # add this new data to the queue                                                                                                                    
 
 
-        voltage_index += 1                                                   # update the voltage index to read the next voltage in the ao_voltages list
+        voltage_index += 1                                                   # update the voltage index to read the next voltage in the ao_voltages list                                                                         
+
+
+
+
+fig, ax = plt.subplots()
+diode_line, = ax.plot([],[], label='diode') # ax.plot() returns a tuple (uneditable list) of Line 2D elements which makes diode_line really hard to edit later on. To get around this, we
+#                                            use a comma after the variable name to unpack the tuple and turn it into a single Line 2D object that we can edit.
+
+def update(frame):
+    global diode_plot                                              # ensure we can update this variable using this function                                                                         
+
+    try:                                                           # use try except to deal with any exceptions raised                                                                              
+        (diode_avg, current) = data_queue.get_nowait()             # get and remove the oldest data from the queue only if the nidaqmx_task function is not busy adding more data to it             
+    except:                                                        # occurs when the queue is empty or when nidaqmx_task function is adding more data to the queue when we also want to read from it
+        print(f"nothing to plot yet")                             
+        return [diode_line]                                        # return our line as a list to FuncAnimation at the end of our code                                                              
+
+
+                                                                  
+    diode_plot = np.hstack((diode_plot, [[diode_avg], [current]])) # Add new points to the data we're collecting                                                                                    
+
+
+
+    diode_line.set_data(diode_plot[0], diode_plot[1])              # Update plot lines unsing the new data
+
+    return [diode_line]                                            # Return our line as a list to FuncAnimation at the end of our code
 
 
 
 
 
-nidaqmx_task(ao_voltages)                           #run the function defined above and give it the ao_voltages data                              
 
-# Create The Figure
-fig, ax = plt.subplots()                            # create ture and initialize a subplot with the name ax                                        
-ax.plot(diode_plot[0],diode_plot[1], label='diode') # this creates a list of line 2D objects which will be used by matplotlib to create the graph  
-ax.set_xlim(-10,10)                                 # set the x axis limits in volts (try changing this to update based on max_voltage/min_voltage)
-ax.set_ylim(-0.01,0.1 )                             # set the y axis limit in ampères                                                              
-plt.show()                                          # show our graph!                                                                              
-                                                    # Next try to write some code to save the graph!                                               
+    
+t = threading.Thread(target=nidaqmx_task,args=([ao_voltages]))
+t.start()
+
+#\/ \/ \/ \/ \/ EVERYTHING BELOW HERE RUNS ON THE MAIN THREAD \/ \/ \/ \/ (it also doesn't need to be explicitly defined)
+
+ax.set_xlim(-10,10)
+ax.set_ylim(-0.01,0.1)
+ani = animation.FuncAnimation(fig, update, interval=100, blit=True) # calls the update() function every 100 ms to update the plot. The blit=True tells FuncAnimation to use a technique called blitting
+#                                                                     which allows the plot to be drawn quicker if the interval is small. Blitting works by remembering most of the details of the plot so that it only has to redraw the line each time update is called.
+#                                                                    (I think)
+
+plt.show()
+
+t.join() # when the plot is closed, wait for the thread to finnish
+
 
 transposed_data = np.transpose(diode_plot)          # make our columns rows and vice versa                                                         
 df=pd.DataFrame(transposed_data)                    # create a data frame (like a python spreadsheet)                                              
 df.to_csv(r"C:\Users\lenovo\Downloads\data.csv")    # save the data to a place on our computer (the r indicates that the string is a file path)
+
+
+
