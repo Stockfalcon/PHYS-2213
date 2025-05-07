@@ -1,5 +1,5 @@
-# Coded by Thomas Murimboh with help from ChatGTP and Copilot 
-# May 05, 2025
+# Coded by Thomas Murimboh with help from ChatGTP and Copilot; comments by Thomas Murimboh
+# May 07, 2025
 
 
 # ----- MISTAKES(?) IN LAST WEEK'S LAB -----
@@ -15,26 +15,14 @@
 # https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
 
 # ----- SETTING THE STAGE -----
-
-
-# ----- LINKS TO DOCUMENTATION -----
-
-
-
-# ----- LINKS TO DOCUMENTATION -----
-
-# ----- NOTE -----
-# Apparently hardware timing is not supported on the NI USB-6002 which is the device I was using.
-# So, this program is built around software timing instead wich is less precice and slower, but it gets the job done.
+# In this part we will be plotting the data from the DAQ dvice in real time using matpotlib.plot.pause()
 
 import nidaqmx                                      # use to communicate with our DAQ card                                                                                   
 from nidaqmx.constants import TerminalConfiguration # an enum (variable with very specific values) that indicate to the nidaqmx.Task() function how to configure each channel
 import numpy as np                                  # for doing calulations and modifying arrays                                                                             
-import matplotlib.pyplot as plt                     # used to help plot our data                                                                                             
-import pandas as pd                                 # for easily sorting our data as a .CSV                                                                                  
-from queue import Queue                             # we will be using this to control how data is accessed between data aquisition and ploting.
-#                                                     It's knind of like a fancy python list and will be especially important in part 3 when we to use the threading library to speed up our program
-
+import matplotlib.pyplot as plt                     # used to help plot our data    
+import pandas as pd                                 # for easily sorting our data as a .CSV  
+import time                                                                                
 
 # Device Parameters
 device = 'Dev2'          # your device name                              
@@ -43,73 +31,89 @@ diode_channel = 'ai1'    # your diode port
 voltage_channel ='ao0'   # your analog out port connected to your circuit
 
 # Sampling Parameters (How to sample data)
-max_voltage = 2                                                        # the maximum voltage that will be outputted (dependent on your device)                                
-min_voltage = -2                                                       # the minimum voltage that will be outputted (dependent on your device)                                
-sample_rate = 1000                                                     # the number of samples per second that will be taken                                                  
+max_voltage = 10                                                       # the maximum voltage that will be outputted (dependent on your device)                                
+min_voltage = -10                                                      # the minimum voltage that will be outputted (dependent on your device)                                
+sample_rate = 10000                                                    # the number of samples per second that will be taken                                                  
 total_data_points = 100                                                # the total number of data points that will be plotted (the more points, the longer it takes)          
-samples_per_point = 50                                                 # we will be taking the average of this many samples for each point plotted to get rid of noise        
+samples_per_point = 500                                                # we will be taking the average of this many samples for each point plotted to get rid of noise        
 ao_voltages = np.linspace(min_voltage, max_voltage, total_data_points) # this evenly spaces total_data_points numper of points between min_voltage and max_voltage (inclusive)
-resistance = 110                                                       # resistance of the resistor in ohms
+resistance = 1000                                                      # resistance of the resistor in ohms
 
 # Other Various parameters
-diode_plot = np.array([[min_voltage],[0]]) # this will be a 2D into which we will store our data points (the legth of the final array will be equal to total_data_points)
-voltage_index = 0                          # used for looping through ao_voltages
-
+voltage_index = 0 # used for looping through ao_voltages
 
 # Task Setup
-task_ai, task_ao = nidaqmx.Task(), nidaqmx.Task()                                                               # inititlize two Task classes                                                          
+task_ai, task_ao = nidaqmx.Task(), nidaqmx.Task() # inititlize two Task classes 
 
-# Setup Resistor Analog Input
-task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{resistor_channel}',                                        
-                                        terminal_config=TerminalConfiguration.DIFF)                             # add an ai channel and set the measurement type to a differential measurement system. 
-#                                                                                                               This ensures that the input measured is NOT referenced to ground, but to the negative ai0 terminal.
-#                                                                                                               https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
-#                                                                                                               setup diode analog input.
+# set up resistor analog input.
+task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{resistor_channel}',
+                                        terminal_config=TerminalConfiguration.DIFF)                            # add an ai channel and set the measurement type to a differential measurement system. 
+#                                                                                                                This ensures that the input measured is NOT referenced to ground, but to the negative ai0 terminal.           
+#                                                                                                                https://www.ni.com/docs/en-US/bundle/ni-daqmx/page/refsingleended.html
 
-# Setup Diode Analog Input
+#setup diode analog input.                                                                                                                                                                               
 task_ai.ai_channels.add_ai_voltage_chan(f'{device}/{diode_channel}',terminal_config=TerminalConfiguration.DIFF) # add an ai channel and set the measurement type to a differential measurement system. 
-#                                                                                                               We can use task_ai for both the diode and resistor because one task can control multiple           
-#                                                                                                               channels as long as they can be configured in the same way (eg. timing, start trigger).            
+#                                                                                                                We can use task_ai for both the diode and resistor because one task can control multiple
+#                                                                                                                channels as long as they can be configured in the same way (eg. timing, start trigger). 
 
-# Setup Analog Output
-task_ao.ao_channels.add_ao_voltage_chan(f'{device}/{voltage_channel}',                                                                                                           
-                                        min_val=-10.0, max_val=10.0)                                            # add an ao channel and set the max and min output values (varies depending on device).
+# setup analog output.
+task_ao.ao_channels.add_ao_voltage_chan(f'{device}/{voltage_channel}',                                           # add an ao channel and set the max and min output values (varies depending on device).
+                                        min_val=-10.0, max_val=10.0)
 
 
-def nidaqmx_task(ao_voltages):                                               # create a function with a space to put our voltagesto output                                                                                       
-    global voltage_index, diode_plot                                         # ensure we can modify these variables inside our function                                                                                          
-    task_ao.start()                                                          # start our analog out task                                                                                                                         
-    task_ai.start()                                                          # start our analog in task                                                                                                                          
+def start_up():                                                          # The purpose of this function is to initialize the diode_plot variable with our first data_point                                             
+    print("Setting up diode plot")                                      
+    global diode_plot                                                    # ensure we can edit the variable diode_plot inside this function                                                                             
+    task_ao.start()                                                      # start our analog out task                                                                                                                   
+    task_ai.start()                                                      # start our analog in task                                                                                                                    
 
-    while voltage_index < len(ao_voltages):                                  # keep running this code until we have outputted and read data from all the voltages                                                                
+    task_ao.write(min_voltage)                                          
+    data = task_ai.read(number_of_samples_per_channel=samples_per_point) # collect samples_per_point many data points from each channel and store them in a 2d array.                                                  
+                                                                         # resistor data will be stored in data[0] and diode data will be stored in data[1] because this is the order in which we added them to task_ai
+    resistor_avg = np.mean(data[0])                                      # take the average of all collected data points to reduce noise                                                                               
+    diode_avg = np.mean(data[1])                                         # take the average of all collected data points to reduce noise                                                                               
+    current = resistor_avg/resistance                                    # calculate the currrent through the diode & resistor                                                                                         
+    diode_plot = [[diode_avg],[current]]                                 # save the initial averages to the data to plot                                                                                               
+    task_ai.stop()                                                       # stop the analog input task                                                                                                                  
+    task_ao.stop()                                                       # stop the analog output task
+
+def nidaqmx_task(ao_voltages):       # create a function with a space to put our voltagesto output
+    global voltage_index, diode_plot # ensure we can modify these variables inside our function   
+    task_ao.start()                  # start our analog out task                                  
+    task_ai.start()                  # start our analog in task
+
+    while voltage_index < len(ao_voltages):
         task_ao.write(ao_voltages[voltage_index])                            # output the voltage in the list ao_voltages indexed by the value voltage index (we would have to ouput more data if we were usinng hardawre timing)
         data = task_ai.read(number_of_samples_per_channel=samples_per_point) # collect samples_per_point many data points from each channel and store them in a 2d array.                                                        
                                                                              # resistor data will be stored in data[0] and diode data will be stored in data[1] because this is the order in which we added them to task_ai      
-
         resistor_avg = np.mean(data[0])                                      # take the average of all collected data points to reduce noise                                                                                     
         diode_avg = np.mean(data[1])                                         # take the average of all collected data points to reduce noise                                                                                     
-
         current = resistor_avg/resistance                                    # calculate the currrent through the diode & resistor                                                                                               
-
-        diode_plot = np.hstack((diode_plot, [[diode_avg], [current]]))       # add this to the data we will be plotting                                                                                                          
-
-
+        diode_plot = np.hstack((diode_plot, [[diode_avg], [current]]))       # add the data to the list of data to plot (is np.columnstack() better?)                                                                            
+        line.set_data(diode_plot)                                            # plot the data as a line on the axes                                                                                                               
+        plt.pause(0.01)                                                      # update the plot every 0.01 seconds (only possible because of plt.ion())                                                                           
+        print("plotted")                                                    
         voltage_index += 1                                                   # update the voltage index to read the next voltage in the ao_voltages list
 
+fig, ax= plt.subplots()                     # create the figure and one set of axes to plot data                                                                                         
+diode_line, = ax.plot([],[], label='diode') # ax.plot() returns a tuple (uneditable list) of Line 2D elements which makes diode_line really hard to edit later on. To get around this, we
+#                                           use a comma after the variable name to unpack the tuple and turn it into a single Line 2D object that we can edit. 
+ax.set_xlim(min_voltage,max_voltage)        # set x axis limits                                                                                                                          
+ax.set_ylim(-0.01,0.03)                     # set y axis limits                                                                                                                          
+ax.set_xlabel("Diode Voltage (v)")          # set x axis title                                                                                                                           
+ax.set_ylabel("Current (A)")                # set y axis titile                                                                                                                          
+ax.set_title("Diode Built-in Potential")    # set Axes title                                                                                                                             
+line, = ax.plot([],[])                      # ax.plot() returns a tuple (uneditable list) of Line 2D elements which makes diode_line really hard to edit later on. To get around this, we
+#                                            use a comma after the variable name to unpack the tuple and turn it into a single Line 2D object that we can edit.
+plt.tight_layout()                          # set the layout style so that all the labels fit
 
+start_time = time.time()   # get the current time (used to calculate plotting time later)                    
+start_up()                 # initialize diode_plot                                                           
+nidaqmx_task(ao_voltages)  # run the function to read data and plot the points                               
+plt.show()                 # show the plot (blocks the rest of the code from running while the plot is shown)
+end_time = time.time()     # get the time when the plot is closed                                            
+print(end_time-start_time) # print the amount of time that the plot was shown for +initilizing it      
 
-
-
-nidaqmx_task(ao_voltages)                           # run the function defined above and give it the ao_voltages data                              
-
-# Create The Figure
-fig, ax = plt.subplots()                            # create ture and initialize a subplot with the name ax                                        
-ax.plot(diode_plot[0],diode_plot[1], label='diode') # this creates a list of line 2D objects which will be used by matplotlib to create the graph  
-ax.set_xlim(-10,10)                                 # set the x axis limits in volts (try changing this to update based on max_voltage/min_voltage)
-ax.set_ylim(-0.01,0.1 )                             # set the y axis limit in ampères                                                              
-plt.show()                                          # show our graph!                                                                              
-                                                    # Next try to write some code to save the graph!                                               
-
-transposed_data = np.transpose(diode_plot)          # make our columns rows and vice versa
+transposed_data = np.transpose(diode_plot)          # make our columns rows and vice versa                                                         
 df=pd.DataFrame(transposed_data)                    # create a data frame (like a python spreadsheet)                                              
-df.to_csv(r"C:\Users\lenovo\Downloads\data.csv")    # save the data to a place on our computer (the r indicahe figtes the string is a file path)
+df.to_csv(r"C:\Users\lenovo\Downloads\data.csv")    # save the data to a place on our computer (the r indicates that the string is a file path)
