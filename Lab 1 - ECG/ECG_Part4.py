@@ -16,7 +16,7 @@ import pandas as pd                                                  # for savin
 from scipy.signal import butter, filtfilt, find_peaks                # these premade functions in the scipy library will help filter our noisy data, and find peaks in our signal    
 
 # Parameters
-device = "Dev1"                           # Your NI device name
+device = "Dev2"                           # Your NI device name
 channel = "ai0"                           # Analog input channel
 sample_rate = 1000                        # Samples per second (Hz)
 total_time = 10                            # Total acquisition time in seconds
@@ -57,7 +57,7 @@ filtered_data = apply_bandpass_filter(data, lowcut=0.5, highcut=40.0, fs=sample_
 #                                                                                              override the fs value from the function definition with sample_rate, and keep the other argument values the same as the function definition
 
 df=pd.DataFrame(filtered_data, index=times, columns=['voltage'])                               # create a dataframe (like a python spreadsheet). The index is the time axis, and the data is the voltage values.                        
-df.to_csv(r'F:\python\ECG Stuff\ECG_data.csv', index=True, header=True)                        # Save the data to a CSV file (the r at the beginning indicates that this is a file path)
+# df.to_csv(r'F:\python\ECG Stuff\ECG_data.csv', index=True, header=True)                        # Save the data to a CSV file (the r at the beginning indicates that this is a file path)
 
 
 # Peak detection
@@ -75,14 +75,15 @@ print(f"Detected {len(peaks)} beats in {total_time:.2f} seconds.")
 print(f"Estimated Heart Rate: {heart_rate:.2f} beats per minute (bpm)\n\n")
 
 # Plot the final graph
-plt.figure(figsize=(10, 5))                                                # create a figure and set the figure size to 10" by 5"                                               
-plt.plot(times, filtered_data, linewidth=2, label="Filtered ECG Signal")   # plot signal data with a label                                                                      
-plt.plot(times[peaks], filtered_data[peaks], 'rx', label="Detected Peaks") # plots points at times and heights indexed by [peaks]. rx stands for red x (marker colour and shape)
-plt.xlabel('Time (seconds)')                                               # label the x axis                                                                                   
-plt.ylabel('Voltage (V)')                                                  # label the y axis                                                                                   
-plt.title('ECG Signal with Detected Peaks')                                # title the graph
-plt.legend(loc="best")                                                     # 1 is top right, 2 is top left, 3 is bottom right, 4 is bottom left. You can also spell out locations (eg. "center left"). https: // matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.legend.html
-plt.grid(True)                                                             # show a grid background                                                                                                          
+fig, ax = plt.subplots(figsize=(10,5)) # create a figure with one set of axes to put data and set thw figure size to 10" wide by 5" tall
+ax.plot(times, filtered_data, linewidth=2, label="Filtered ECG Signal")   # plot signal data with a label                                                                      
+ax.plot(times[peaks], filtered_data[peaks], 'rx', label="Detected Peaks") # plots points at times and heights indexed by [peaks]. rx stands for red x (marker colour and shape)
+ax.set_xlabel('Time (seconds)')                                               # label the x axis                                                                                   
+ax.set_ylabel('Voltage (V)')                                                  # label the y axis                                                                                   
+ax.set_title('ECG Signal with Detected Peaks')                                # title the graph
+ax.legend(loc="best")                                                     # 1 is top right, 2 is top left, 3 is bottom right, 4 is bottom left. You can also spell out locations (eg. "center left"). https: // matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.legend.html
+ax.grid(True)                                                             # show a grid background      
+fig.tight_layout()
 plt.show()                                                                 # show the final plot
 
 
