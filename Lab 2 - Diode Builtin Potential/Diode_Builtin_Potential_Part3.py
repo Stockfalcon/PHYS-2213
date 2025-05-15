@@ -127,7 +127,7 @@ fig, ax= plt.subplots()                     # create the figure and one set of a
 diode_line, = ax.plot([],[], label='diode') # ax.plot() returns a tuple (uneditable list) of Line 2D elements which makes diode_line really hard to edit later on. To get around this, we
 #                                           use a comma after the variable name to unpack the tuple and turn it into a single Line 2D object that we can edit. 
 ax.set_xlim(min_voltage,max_voltage)        # set x axis limits                                                                                                                          
-ax.set_ylim(-0.01,0.03)                     # set y axis limits                                                                                                                          
+ax.set_ylim(-0.01,0.01)                     # set y axis limits                                                                                                                          
 ax.set_xlabel("Diode Voltage (v)")          # set x axis title                                                                                                                           
 ax.set_ylabel("Current (A)")                # set y axis titile                                                                                                                          
 ax.set_title("Diode Built-in Potential")    # set Axes title                                                                                                                             

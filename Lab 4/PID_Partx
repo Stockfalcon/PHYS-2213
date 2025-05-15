@@ -1,0 +1,182 @@
+import nidaqmx
+from nidaqmx.constants import TerminalConfiguration
+import numpy as np
+import queue
+import time
+import threading
+import matplotlib.pyplot as plt
+from matplotlib.animation import  FuncAnimation
+
+device = "Dev2"
+ai_channel = "ai0"
+ao_channel = "ao1"
+
+sample_rate = 10000
+samples_per_point = 1000
+
+plot_queue = queue.Queue()
+
+ki = 6.1115
+kp = 0.2037
+kd = 45.8365
+set_point = 27
+
+start_time = time.time()
+current_time = 0
+
+print("Starting nidaqmx tasks and taking initial readings")
+ai_task = nidaqmx.Task()
+ao_task = nidaqmx.Task()
+ai_task.ai_channels.add_ai_voltage_chan(f"{device}/{ai_channel}",terminal_config=TerminalConfiguration.DIFF)
+ao_task.ao_channels.add_ao_voltage_chan(f"{device}/{ao_channel}")
+ai_task.timing.cfg_samp_clk_timing(rate=sample_rate, samps_per_chan=samples_per_point, sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
+
+
+
+
+pid_state = threading.local()
+temp_state = threading.local()
+def initialize_pid_states():
+    pid_state.old_time = time.time()
+    pid_state.old_process_variable = 0
+    pid_state.old_integral = 0
+
+def thread_start_up():                                                          # The purpose of this function is to initialize the data variables with our first data_point                                             
+    global control_plot_data, temp_plot_data, set_point_plot                                                   # ensure we can edit the data variables  inside this function                                                                             
+    old_time = time.time()
+    ao_task.start()                                                      # start our analog out task                                                                                                                   
+    ai_task.start()                                                      # start our analog in task                                                                                                                    
+    ao_task.write(0)                                          
+    data = ai_task.read(number_of_samples_per_channel=samples_per_point)
+    data = np.mean(data)                                 
+    
+    print("Setting up pid_states, and plot for a thread")
+    initialize_pid_states()
+
+    process_variable = data
+    process_variable = process_variable * 1000 - 273.15 # convert voltage to kelvin then to deg C
+    error = set_point - process_variable
+    current_time = time.time()
+    dt = current_time - old_time
+
+    proportional = kp * error
+    integral = ki * error * dt
+    derivative = -kd * ((process_variable)/dt)
+    control_output = proportional + integral + derivative
+
+    control_plot_data = np.array([[0], [error], [proportional], [integral], [derivative], [control_output]])
+    temp_plot_data = np.array([[0],[process_variable]])
+    set_point_plot = np.array([set_point])
+    pid_state.old_time = current_time
+    return control_output
+
+def read_daq():
+    data = ai_task.read(number_of_samples_per_channel=samples_per_point)
+    data_point = np.mean(data)
+    return data_point
+
+def pid_controller(kp, ki, kd, set_point):
+    process_variable = read_daq()
+    process_variable = (process_variable * 1000) - 273 # convert voltage to kelvin then to deg C
+    error = set_point - process_variable
+    current_time = time.time()
+    dt = current_time - pid_state.old_time
+    relative_time = pid_state.old_time + dt - start_time
+
+
+    proportional = kp * error
+    integral = pid_state.old_integral + ki * error * dt
+    derivative = -kd * ((process_variable - pid_state.old_process_variable)/dt)
+    control_output = proportional + integral + derivative
+
+    print(process_variable)
+
+
+
+    pid_state.old_time = current_time
+    pid_state.old_integral = integral
+    pid_state.old_process_variable = process_variable
+
+
+
+    if control_output > 10:
+        control_output = 10
+    elif control_output < -10:
+        control_output = -10
+
+    plot_queue.put((relative_time, error, proportional, integral, derivative, control_output, process_variable))
+    return control_output
+
+def daq_task_loop(kp, ki, kd, set_point):
+    thread_start_up()
+    for i in range(200):
+        new_output = pid_controller(kp, ki, kd, set_point)
+        ao_task.write(new_output)
+
+def update(frames):
+    global control_plot_data, temp_plot_data, set_point_plot
+    try:
+        relative_time, error, proportional, integral, derivative, control_output, new_temp = plot_queue.get_nowait()
+        
+    except:
+        print("queues is empty")
+        return [temp_line, set_point_line, co_line, proportional_line, integral_line, derivative_line]
+    
+    temp_plot_data = np.hstack((temp_plot_data, np.array([[relative_time], [new_temp]])))
+    control_plot_data = np.hstack((control_plot_data, np.array([[relative_time], [error], [proportional], [integral], [derivative], [control_output]])))
+    set_point_plot = np.hstack((set_point_plot, np.array([set_point])))
+    temp_line.set_data(temp_plot_data[0], temp_plot_data[1])
+    set_point_line.set_data(control_plot_data[0], set_point_plot)
+    co_line.set_data(control_plot_data[0], control_plot_data[5])
+    proportional_line.set_data(control_plot_data[0], control_plot_data[2])
+    integral_line.set_data(control_plot_data[0], control_plot_data[3])
+    derivative_line.set_data(control_plot_data[0], control_plot_data[4])
+
+    return [temp_line, set_point_line, co_line, proportional_line, integral_line, derivative_line]
+
+
+
+
+
+
+t = threading.Thread(target=daq_task_loop, args=(kp, ki, kd, set_point))
+t.start()
+
+fig, axs = plt.subplot_mosaic([["temperature", "temperature"],
+                               ["pid", "pid"]])
+
+temp_line, = axs['temperature'].plot([],[], label="temperature")
+set_point_line, = axs['temperature'].plot([],[], label="set point" )
+co_line, = axs['pid'].plot([],[], label="output")
+proportional_line, = axs['pid'].plot([],[], label="proportional") 
+integral_line, = axs['pid'].plot([],[],label="integral")
+derivative_line, = axs['pid'].plot([],[],label="derivative")
+
+axs["temperature"].set_xlim(0,20)
+axs["temperature"].set_ylim(-10,35)
+axs["temperature"].legend()
+axs["pid"].set_xlim(0,20)
+axs["pid"].set_ylim(-15,15)
+axs["pid"].legend()
+plt.tight_layout()
+
+ani = FuncAnimation(fig, update, interval=50, blit=True)
+plt.show()
+t.join()
+ai_task.stop()
+ao_task.stop()
+ai_task.close()
+ao_task.close()
+
+print(f"{temp_plot_data}\n\n")
+print(control_plot_data)
+
+
+
+
+
+
+
+    
+
+
