@@ -1,6 +1,13 @@
 # All code written by Thomas Murimboh except the get frequency function which was written by Chat GTP
 # June 15 2025
 
+# ----- SETTING THE STAGE -----
+# In this lab we will be creating a lock in amplplifier. This code will create a Graphical User Interface (GUI) using Tkinter, a librar that comes with the standard python 3 installation.
+# Each time the GUI updates, it will read the signal from the DAQ card analog input, then take a fourrier transform of the sync signal and determine the dominat frequency.
+# A square wave matching the sync signal's frequency is then made, which will be multiplied by the signal collected from the analog input. We will then take the average of
+# this multiplied signal which acts as alow pass filter and should give us an idea of the signal stregnth. In addition, we will create a slider which can update the square wave's phase.
+
+
 import nidaqmx
 from nidaqmx.constants import TerminalConfiguration, Edge
 import numpy as np
@@ -79,12 +86,13 @@ def get_frequency(data):                                      #  Take a fourrier
     N = len(data)                                             #  get the legth  of the data                                                                                                                             
     zero_padded = np.pad(data, (0, pad_len * N), 'constant')  #  10x zero-padding                                                                                                                                       
 
-    fft_vals = fft.fft(zero_padded)                           #  take a fourrier transform of the zero padded data. This ouputs complex numbers symetrically about the x axis becasue our data is real                  
-    fft_magnitude = np.abs(fft_vals[:len(zero_padded)         // 2])                                                                                                                                                     #  get the absolute values of each fft point on the right side of the x_axis.     // refers to floor division
-    freqs = fft.fftfreq(N, 1 / sample_rate)[:len(zero_padded) // 2]                                                                                                                                                      #  get the corresponding frequencies for each of the corresponding fft magnitudes
+    fft_vals = fft.rfft(zero_padded)                           #  take a fourrier transform of the zero padded data. This ouputs complex numbers symetrically about the x axis becasue our data is real                  
+    fft_magnitude = np.abs(fft_vals)                                                                                                                                                     #  get the absolute values of each fft point on the right side of the x_axis.     // refers to floor division
+    freqs = fft.rfftfreq(len(zero_padded), 1 / sample_rate)                                                                                                                                                      #  get the corresponding frequencies for each of the corresponding fft magnitudes
 
 
     fft_magnitude[0:pad_len] = np.zeros([pad_len])            #  replace the first pad_len number of samples with zeroes. This is because tere is a big spike in fft_magnitudes close to zero.                          
+    print(len(freqs))
     dominant_freq = freqs[np.argmax(fft_magnitude)]           #  get the frequrency correxponding to the largest fft magnitude. argmax returns the position of the biggest number in the fft_magnitude array            
     print(f"Dominant frequency: {dominant_freq} Hz")          #  print the dominant frequency of the array
 
